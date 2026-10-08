@@ -2077,15 +2077,19 @@ class MullvadFinderApp:
                         logger.warning(f"Could not reliably detect system theme: {e}. Defaulting to light.")
                         actual_mode = "light" # Default fallback
 
+                if not hasattr(sv_ttk, "set_theme"):
+                    raise AttributeError("sv_ttk has no set_theme")
                 sv_ttk.set_theme(actual_mode) # Apply "light" or "dark"
-                self.theme_colors = { # Update colors based on sv-ttk's current theme
-                    "background": sv_ttk.style.colors.bg,
-                    "foreground": sv_ttk.style.colors.fg,
-                    "row_odd": sv_ttk.style.colors.bg, # Often same as bg in modern themes
-                    "row_even": sv_ttk.style.colors.alt_bg if hasattr(sv_ttk.style.colors, 'alt_bg') else sv_ttk.style.colors.bg,
-                    "select_bg": sv_ttk.style.colors.select_bg,
-                    "select_fg": sv_ttk.style.colors.select_fg,
-                    # Add more colors as needed from sv_ttk.style.colors
+                sv_style = ttk.Style()
+                bg = sv_style.lookup("TFrame", "background") or self.root.cget("bg")
+                fg = sv_style.lookup("TLabel", "foreground") or ("white" if actual_mode == "dark" else "black")
+                self.theme_colors = { # Update colors based on the active sv-ttk theme
+                    "background": bg,
+                    "foreground": fg,
+                    "row_odd": bg,
+                    "row_even": bg,
+                    "select_bg": sv_style.lookup("Treeview", "background", ("selected",)) or "#0078d4",
+                    "select_fg": "white",
                 }
                 logger.info(f"sv-ttk theme set to '{actual_mode}'.")
 
