@@ -12,6 +12,52 @@ class MullvadCLIError(Exception):
     """Custom exception for errors originating from the Mullvad CLI."""
     pass
 
+def normalize_relays(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert the flat relays.json format (locations + wireguard/openvpn relays)
+    into the legacy nested countries -> cities -> relays structure."""
+    if not isinstance(data, dict):
+        return data
+    if "countries" in data:
+        return data
+    locations = data.get("locations")
+    if not isinstance(locations, dict):
+        logger.warning(f"Neither 'countries' nor 'locations' found in server data. Top-level keys: {list(data.keys())}")
+        return data
+
+    relay_lists = []
+    for proto in ("wireguard", "openvpn"):
+        section = data.get(proto)
+        if isinstance(section, dict):
+            relay_lists.extend((relay, proto) for relay in section.get("relays", []))
+
+    countries: Dict[str, Dict[str, Any]] = {}
+    for loc_key, loc in locations.items():
+        country_code, _, city_code = loc_key.partition("-")
+        country = countries.setdefault(country_code, {
+            "code": country_code, "name": loc.get("country", country_code), "cities": {}})
+        country["cities"].setdefault(city_code, {
+            "code": city_code, "name": loc.get("city", city_code), "relays": []})
+
+    relay_count = 0
+    for relay, proto in relay_lists:
+        loc_key = relay.get("location")
+        if loc_key not in locations:
+            continue
+        country_code, _, city_code = loc_key.partition("-")
+        relay = dict(relay)
+        if "endpoint_data" not in relay:
+            relay["endpoint_data"] = {"wireguard": {}} if proto == "wireguard" else "openvpn"
+        countries[country_code]["cities"][city_code]["relays"].append(relay)
+        relay_count += 1
+
+    data["countries"] = [
+        {**c, "cities": [city for city in c["cities"].values() if city["relays"]]}
+        for c in countries.values()
+    ]
+    data["countries"] = [c for c in data["countries"] if c["cities"]]
+    logger.info(f"Converted flat relays format to nested structure: {len(data['countries'])} countries, {relay_count} relays.")
+    return data
+
 def load_cached_servers(cache_path: str) -> Optional[Dict[str, Any]]:
     """Load the cached Mullvad servers JSON from the specified path."""
     logger.info(f"Attempting to load cached servers from: {cache_path}")
@@ -22,7 +68,7 @@ def load_cached_servers(cache_path: str) -> Optional[Dict[str, Any]]:
         with open(cache_path, "r", encoding='utf-8') as f:
             data = json.load(f)
         logger.info(f"Successfully loaded server data from {cache_path}")
-        return data
+        return normalize_relays(data)
     except json.JSONDecodeError as e:
         logger.exception(f"Error decoding JSON from {cache_path}: {e}")
         return None
